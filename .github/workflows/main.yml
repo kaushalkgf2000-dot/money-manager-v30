@@ -13,7 +13,9 @@ jobs:
 
       - name: Extract ZIP
         run: |
-          unzip -o Money_Manager_V30_PHONE_CLOUD_BUILD_STEP5A.zip -d project
+          mkdir -p project
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name 'Money_Manager_V30_*.zip' | head -n 1)
+          unzip -o "$ZIP_FILE" -d project
 
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -24,14 +26,29 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build APK
-        working-directory: project
+      - name: Find Gradle Project
         run: |
+          GRADLEW=$(find project -type f -name gradlew | head -n 1)
+          if [ -z "$GRADLEW" ]; then
+            echo "ERROR: gradlew not found inside ZIP"
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$GRADLEW")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        run: |
+          cd "$PROJECT_DIR"
           chmod +x gradlew
           ./gradlew assembleDebug
+
+      - name: Prepare APK
+        run: |
+          mkdir -p apk-output
+          cp "$PROJECT_DIR"/app/build/outputs/apk/debug/app-debug.apk apk-output/
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Money-Manager-debug-apk
-          path: project/app/build/outputs/apk/debug/app-debug.apk
+          path: apk-output/app-debug.apk
