@@ -15,6 +15,10 @@ jobs:
         run: |
           mkdir -p project
           ZIP_FILE=$(find . -maxdepth 1 -type f -name 'Money_Manager_V30_*.zip' | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Money Manager ZIP not found"
+            exit 1
+          fi
           unzip -o "$ZIP_FILE" -d project
 
       - name: Setup JDK
@@ -26,26 +30,41 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
       - name: Find Gradle Project
         run: |
-          GRADLEW=$(find project -type f -name gradlew | head -n 1)
-          if [ -z "$GRADLEW" ]; then
-            echo "ERROR: gradlew not found inside ZIP"
+          BUILD_FILE=$(find project -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' -o -name 'build.gradle' -o -name 'build.gradle.kts' \) | head -n 1)
+
+          if [ -z "$BUILD_FILE" ]; then
+            echo "ERROR: Gradle project files not found inside ZIP"
+            find project -maxdepth 4 -type f | head -100
             exit 1
           fi
-          PROJECT_DIR=$(dirname "$GRADLEW")
+
+          PROJECT_DIR=$(dirname "$BUILD_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Gradle project found at: $PROJECT_DIR"
 
       - name: Build APK
         run: |
           cd "$PROJECT_DIR"
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          gradle assembleDebug --stacktrace
 
       - name: Prepare APK
         run: |
           mkdir -p apk-output
-          cp "$PROJECT_DIR"/app/build/outputs/apk/debug/app-debug.apk apk-output/
+          APK=$(find "$PROJECT_DIR" -type f -name 'app-debug.apk' | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated"
+            exit 1
+          fi
+
+          cp "$APK" apk-output/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
