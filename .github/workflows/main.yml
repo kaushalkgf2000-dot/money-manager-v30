@@ -11,30 +11,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find Money Manager ZIP
+      - name: Find project ZIP
+        shell: bash
         run: |
-          echo "Searching for project ZIP..."
-          ZIP_FILE=$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)
+          set -e
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found in repository"
-            echo "Repository files:"
-            find . -maxdepth 3 -type f | head -100
+          mapfile -t ZIPS < <(find . -maxdepth 1 -type f -iname '*.zip' -print)
+
+          if [ "${#ZIPS[@]}" -eq 0 ]; then
+            echo "ERROR: No project ZIP found in repository root."
             exit 1
           fi
 
-          echo "ZIP found: $ZIP_FILE"
+          if [ "${#ZIPS[@]}" -eq 1 ]; then
+            ZIP_FILE="${ZIPS[0]}"
+          else
+            ZIP_FILE=$(printf '%s\n' "${ZIPS[@]}" | grep -i 'PaisaFlow' | head -n 1 || true)
+
+            if [ -z "$ZIP_FILE" ]; then
+              echo "ERROR: Multiple ZIP files found. Keep only the project ZIP."
+              printf '%s\n' "${ZIPS[@]}"
+              exit 1
+            fi
+          fi
+
+          echo "Using project ZIP: $ZIP_FILE"
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
       - name: Extract project ZIP
+        shell: bash
         run: |
+          set -e
           rm -rf project
           mkdir -p project
-
           unzip -o "$ZIP_FILE" -d project
-
-          echo "Extracted project files:"
-          find project -maxdepth 4 -type f | head -100
 
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -51,52 +61,50 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Find Gradle Project
+        shell: bash
         run: |
+          set -e
+
           SETTINGS_FILE=$(find project -type f \( \
             -name 'settings.gradle' -o \
             -name 'settings.gradle.kts' \
           \) | head -n 1)
 
-          if [ -n "$SETTINGS_FILE" ]; then
-            PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-          else
-            BUILD_FILE=$(find project -type f \( \
-              -name 'build.gradle' -o \
-              -name 'build.gradle.kts' \
-            \) | head -n 1)
-
-            if [ -z "$BUILD_FILE" ]; then
-              echo "ERROR: Gradle project files not found inside ZIP"
-              find project -maxdepth 5 -type f
-              exit 1
-            fi
-
-            PROJECT_DIR=$(dirname "$BUILD_FILE")
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Gradle project found at: $PROJECT_DIR"
-
-      - name: Build Debug APK
-        run: |
-          cd "$PROJECT_DIR"
-          gradle assembleDebug --stacktrace
-
-      - name: Find APK
-        run: |
-          APK=$(find "$PROJECT_DIR" -type f -name '*.apk' | head -n 1)
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated"
-            find "$PROJECT_DIR" -type f | grep -E '\.(apk|aab)$' || true
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: Gradle settings file not found inside ZIP."
+            find project -maxdepth 6 -type f
             exit 1
           fi
 
-          echo "APK found: $APK"
-          echo "APK=$APK" >> "$GITHUB_ENV"
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Gradle project: $PROJECT_DIR"
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --stacktrace
+          else
+            gradle assembleDebug --stacktrace
+          fi
 
       - name: Prepare APK
+        shell: bash
         run: |
+          set -e
+          APK=$(find "$PROJECT_DIR" -type f -name 'app-debug.apk' | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: app-debug.apk was not generated."
+            find "$PROJECT_DIR" -type f -name '*.apk' -print
+            exit 1
+          fi
+
           mkdir -p apk-output
           cp "$APK" apk-output/PaisaFlow-debug.apk
 
