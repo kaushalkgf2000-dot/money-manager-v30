@@ -8,66 +8,158 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # 1. Download repository files
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract ZIP
+      # 2. Find and extract project ZIP
+      - name: Extract Money Manager ZIP
+        shell: bash
         run: |
+          set -e
+
+          echo "Files in repository:"
+          find . -maxdepth 2 -type f -print
+
           mkdir -p project
-          ZIP_FILE=$(find . -maxdepth 1 -type f -name 'Money_Manager_V30_*.zip' | head -n 1)
+
+          ZIP_FILE=$(find . -maxdepth 1 -type f \
+            \( -iname "*.zip" \) \
+            | head -n 1)
+
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Money Manager ZIP not found"
+            echo "ERROR: No ZIP file found in repository root."
             exit 1
           fi
+
+          echo "ZIP found: $ZIP_FILE"
+
           unzip -o "$ZIP_FILE" -d project
 
+          echo "Extracted project files:"
+          find project -maxdepth 4 -type f | head -200
+
+
+      # 3. Install Java
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
+
+      # 4. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
 
+      # 5. Find Android/Gradle project
       - name: Find Gradle Project
+        shell: bash
         run: |
-          BUILD_FILE=$(find project -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' -o -name 'build.gradle' -o -name 'build.gradle.kts' \) | head -n 1)
+          set -e
+
+          BUILD_FILE=$(find project -type f \
+            \( \
+              -name "settings.gradle" \
+              -o -name "settings.gradle.kts" \
+              -o -name "build.gradle" \
+              -o -name "build.gradle.kts" \
+            \) | head -n 1)
 
           if [ -z "$BUILD_FILE" ]; then
-            echo "ERROR: Gradle project files not found inside ZIP"
-            find project -maxdepth 4 -type f | head -100
+            echo "ERROR: Gradle project was not found inside ZIP."
+            echo ""
+            echo "Files found:"
+            find project -maxdepth 6 -type f -print
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$BUILD_FILE")
+
+          echo "Gradle project found:"
+          echo "$PROJECT_DIR"
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Gradle project found at: $PROJECT_DIR"
 
-      - name: Build APK
+
+      # 6. Setup Gradle
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+
+      # 7. Build APK
+      - name: Build Debug APK
+        shell: bash
         run: |
+          set -e
+
           cd "$PROJECT_DIR"
-          gradle assembleDebug --stacktrace
 
-      - name: Prepare APK
+          echo "Building project from:"
+          pwd
+
+          echo "Project files:"
+          ls -la
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --stacktrace
+          else
+            gradle assembleDebug --stacktrace
+          fi
+
+
+      # 8. Find generated APK
+      - name: Find APK
+        shell: bash
         run: |
-          mkdir -p apk-output
-          APK=$(find "$PROJECT_DIR" -type f -name 'app-debug.apk' | head -n 1)
+          set -e
+
+          echo "Searching for APK..."
+
+          APK=$(find "$PROJECT_DIR" \
+            -type f \
+            \( -name "*.apk" \) \
+            | grep -E "debug|release" \
+            | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated"
+            echo "ERROR: APK was not generated."
+            echo ""
+            echo "APK search result:"
+            find "$PROJECT_DIR" -type f -name "*.apk" -print
             exit 1
           fi
 
-          cp "$APK" apk-output/app-debug.apk
+          echo "APK found:"
+          echo "$APK"
 
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+
+      # 9. Prepare APK
+      - name: Prepare APK
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p apk-output
+
+          cp "$APK_PATH" \
+            "apk-output/Money_Manager_Debug.apk"
+
+          echo "Final APK:"
+          ls -lh apk-output/
+
+
+      # 10. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Money-Manager-debug-apk
-          path: apk-output/app-debug.apk
+          name: Money-Manager-APK
+          path: apk-output/Money_Manager_Debug.apk
+          if-no-files-found: error
