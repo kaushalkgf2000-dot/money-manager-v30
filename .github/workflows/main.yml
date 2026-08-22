@@ -1,4 +1,4 @@
-name: Build Money Manager APK
+name: Build PaisaFlow APK
 
 on:
   workflow_dispatch:
@@ -8,158 +8,101 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      # 1. Download repository files
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Find and extract project ZIP
-      - name: Extract Money Manager ZIP
-        shell: bash
+      - name: Find Money Manager ZIP
         run: |
-          set -e
-
-          echo "Files in repository:"
-          find . -maxdepth 2 -type f -print
-
-          mkdir -p project
-
-          ZIP_FILE=$(find . -maxdepth 1 -type f \
-            \( -iname "*.zip" \) \
-            | head -n 1)
+          echo "Searching for project ZIP..."
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found in repository root."
+            echo "ERROR: No ZIP file found in repository"
+            echo "Repository files:"
+            find . -maxdepth 3 -type f | head -100
             exit 1
           fi
 
           echo "ZIP found: $ZIP_FILE"
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      - name: Extract project ZIP
+        run: |
+          rm -rf project
+          mkdir -p project
 
           unzip -o "$ZIP_FILE" -d project
 
           echo "Extracted project files:"
-          find project -maxdepth 4 -type f | head -200
+          find project -maxdepth 4 -type f | head -100
 
-
-      # 3. Install Java
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-
-      # 4. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-
-      # 5. Find Android/Gradle project
-      - name: Find Gradle Project
-        shell: bash
-        run: |
-          set -e
-
-          BUILD_FILE=$(find project -type f \
-            \( \
-              -name "settings.gradle" \
-              -o -name "settings.gradle.kts" \
-              -o -name "build.gradle" \
-              -o -name "build.gradle.kts" \
-            \) | head -n 1)
-
-          if [ -z "$BUILD_FILE" ]; then
-            echo "ERROR: Gradle project was not found inside ZIP."
-            echo ""
-            echo "Files found:"
-            find project -maxdepth 6 -type f -print
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$BUILD_FILE")
-
-          echo "Gradle project found:"
-          echo "$PROJECT_DIR"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-
-      # 6. Setup Gradle
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.11.1"
+          gradle-version: '8.11.1'
 
-
-      # 7. Build APK
-      - name: Build Debug APK
-        shell: bash
+      - name: Find Gradle Project
         run: |
-          set -e
+          SETTINGS_FILE=$(find project -type f \( \
+            -name 'settings.gradle' -o \
+            -name 'settings.gradle.kts' \
+          \) | head -n 1)
 
-          cd "$PROJECT_DIR"
-
-          echo "Building project from:"
-          pwd
-
-          echo "Project files:"
-          ls -la
-
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --stacktrace
+          if [ -n "$SETTINGS_FILE" ]; then
+            PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           else
-            gradle assembleDebug --stacktrace
+            BUILD_FILE=$(find project -type f \( \
+              -name 'build.gradle' -o \
+              -name 'build.gradle.kts' \
+            \) | head -n 1)
+
+            if [ -z "$BUILD_FILE" ]; then
+              echo "ERROR: Gradle project files not found inside ZIP"
+              find project -maxdepth 5 -type f
+              exit 1
+            fi
+
+            PROJECT_DIR=$(dirname "$BUILD_FILE")
           fi
 
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Gradle project found at: $PROJECT_DIR"
 
-      # 8. Find generated APK
-      - name: Find APK
-        shell: bash
+      - name: Build Debug APK
         run: |
-          set -e
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --stacktrace
 
-          echo "Searching for APK..."
-
-          APK=$(find "$PROJECT_DIR" \
-            -type f \
-            \( -name "*.apk" \) \
-            | grep -E "debug|release" \
-            | head -n 1)
+      - name: Find APK
+        run: |
+          APK=$(find "$PROJECT_DIR" -type f -name '*.apk' | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            echo ""
-            echo "APK search result:"
-            find "$PROJECT_DIR" -type f -name "*.apk" -print
+            echo "ERROR: APK was not generated"
+            find "$PROJECT_DIR" -type f | grep -E '\.(apk|aab)$' || true
             exit 1
           fi
 
-          echo "APK found:"
-          echo "$APK"
+          echo "APK found: $APK"
+          echo "APK=$APK" >> "$GITHUB_ENV"
 
-          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
-
-
-      # 9. Prepare APK
       - name: Prepare APK
-        shell: bash
         run: |
-          set -e
-
           mkdir -p apk-output
+          cp "$APK" apk-output/PaisaFlow-debug.apk
 
-          cp "$APK_PATH" \
-            "apk-output/Money_Manager_Debug.apk"
-
-          echo "Final APK:"
-          ls -lh apk-output/
-
-
-      # 10. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Money-Manager-APK
-          path: apk-output/Money_Manager_Debug.apk
+          name: PaisaFlow-debug-apk
+          path: apk-output/PaisaFlow-debug.apk
           if-no-files-found: error
