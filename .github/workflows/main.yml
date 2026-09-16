@@ -1,4 +1,4 @@
-name: Build PaisaFlow APK
+name: Money Flow APK
 
 on:
   workflow_dispatch:
