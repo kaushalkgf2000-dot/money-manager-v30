@@ -37,6 +37,46 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
+      - name: Extract Android project
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p /tmp/moneyflow-project
+
+          ZIP_FILE=$(find . -type f -iname "*.zip" \
+            ! -path "./.git/*" \
+            | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No Android project ZIP found."
+            exit 1
+          fi
+
+          echo "Using project ZIP: $ZIP_FILE"
+
+          unzip -q "$ZIP_FILE" -d /tmp/moneyflow-project
+
+          SETTINGS_FILE=$(find /tmp/moneyflow-project \
+            -type f \
+            -name "settings.gradle" \
+            -o -name "settings.gradle.kts" \
+            | head -n 1)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: settings.gradle was not found inside the ZIP."
+            echo "ZIP contents:"
+            find /tmp/moneyflow-project -maxdepth 4 -type f | head -100
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
       - name: Install Gradle 8.11.1
         shell: bash
         run: |
@@ -45,17 +85,25 @@ jobs:
             -o /tmp/gradle.zip
 
           sudo mkdir -p /opt/gradle
-
           sudo unzip -q /tmp/gradle.zip -d /opt/gradle
 
           echo "/opt/gradle/gradle-8.11.1/bin" >> "$GITHUB_PATH"
 
-      - name: Verify Build Tools
+      - name: Verify Android project
         shell: bash
         run: |
           java -version
           gradle --version
           sdkmanager --version
+
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+
+          test -f "$PROJECT_DIR/settings.gradle" \
+            || test -f "$PROJECT_DIR/settings.gradle.kts"
+
+          test -f "$PROJECT_DIR/app/build.gradle" \
+            || test -f "$PROJECT_DIR/app/build.gradle.kts"
 
           test -d "${ANDROID_SDK_ROOT}/platforms/android-35"
           test -d "${ANDROID_SDK_ROOT}/build-tools/35.0.0"
@@ -63,11 +111,13 @@ jobs:
       - name: Build Debug APK
         shell: bash
         run: |
+          cd "$PROJECT_DIR"
+
           gradle --no-daemon --stacktrace :app:assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MoneyFlow-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: "**/app/build/outputs/apk/debug/app-debug.apk"
           if-no-files-found: error
